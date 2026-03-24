@@ -1,0 +1,61 @@
+/* @import "tailwindcss";
+
+@theme {
+  --color-primary: #5f6FFF;
+  --grid-cols-auto: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.active hr{
+  @apply block;
+}
+
+::-webkit-scrollbar{
+  @apply hidden;
+} */
+
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+
+@import "tailwindcss";
+
+*{
+  font-family: Outfit;
+}
+
+@theme {
+  --color-primary: #5f6FFF;
+  --grid-cols-auto: repeat(5, 1fr);
+}
+
+.active hr{
+  @apply block;
+}
+
+::-webkit-scrollbar{
+  @apply hidden;
+}
+
+.grid-cols-auto{
+  display: grid;
+  grid-template-columns: repeat(1, 1fr);
+  gap: 20px;
+}
+
+/* Desktop view */
+@media (min-width: 768px){
+  .grid-cols-auto{
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+/* Make doctor images uniform */
+.grid-cols-auto img{
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+}
+
+@media (max-width:740px)  {
+  .active p{
+    @apply text-white bg-primary
+  }
+}
