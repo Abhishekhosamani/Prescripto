@@ -5,7 +5,7 @@ import { useContext } from 'react';
 import { AdminContext } from './context/AdminContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, Navigate } from 'react-router-dom';
 import Dashboard from './pages/Admin/Dashboard';
 import AllAppointments from './pages/Admin/AllAppointments';
 import AddDoctor from './pages/Admin/AddDoctor';
@@ -27,8 +27,8 @@ const App = () => {
       <div className='flex items-start' >
         <Sidebar/>
         <Routes>
-          {/* Admin Route */}
-          <Route path='/' element={<></>} />
+          {/* Default redirect based on role */}
+          <Route path='/' element={<Navigate to={aToken ? '/admin-dashboard' : '/doctor-dashboard'} replace />} />
           <Route path='/admin-dashboard' element={<Dashboard/>} />
           <Route path='/all-appointments' element={<AllAppointments/>} />
           <Route path='/add-doctor' element={<AddDoctor/>} />

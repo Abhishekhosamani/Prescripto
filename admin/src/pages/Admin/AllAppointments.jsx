@@ -1,61 +1,83 @@
-import React from 'react'
-import { useContext } from 'react'
+import React, { useContext, useEffect } from 'react'
 import { AdminContext } from '../../context/AdminContext'
-import { useEffect } from 'react'
 import { AppContext } from '../../context/AppContext'
-import { assets } from '../../assets/assets'
 
 const AllAppointments = () => {
-
   const { aToken, appointments, getAllAppointments, cancelAppointment } = useContext(AdminContext)
   const { calculateAge, slotDateFormat, currency } = useContext(AppContext)
 
   useEffect(() => {
-    if (aToken) {
-      getAllAppointments()
-    }
+    if (aToken) getAllAppointments()
   }, [aToken])
 
+  const StatusBadge = ({ item }) => {
+    if (item.cancelled) return <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-500 border border-red-100'>Cancelled</span>
+    if (item.isCompleted) return <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-600 border border-green-100'>Completed</span>
+    return (
+      <button
+        onClick={() => cancelAppointment(item._id)}
+        className='px-2.5 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-500 border border-gray-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all'
+      >
+        Cancel
+      </button>
+    )
+  }
+
   return (
-    <div className='w-full max-w-6xl m-5' >
+    <div className='m-6'>
+      <div className='mb-5'>
+        <h1 className='text-xl font-bold text-gray-800'>All Appointments</h1>
+        <p className='text-sm text-gray-400 mt-0.5'>{appointments.length} appointment{appointments.length !== 1 ? 's' : ''} total</p>
+      </div>
 
-      <p className='mb-3 text-lg font-medium' >All Appointments</p>
-
-      <div className='bg-white border rounded text-sm max-h-[80vh] min-h-[60vh] overflow-y-scroll' >
-
-        <div className='hidden sm:grid grid-cols-[0.5fr_3fr_1fr_3fr_3fr_1fr_1fr] grid-flow-col py-3 px-6 border-b' >
+      <div className='bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden'>
+        {/* Table Header */}
+        <div className='hidden sm:grid grid-cols-[0.5fr_2.5fr_0.8fr_2.5fr_2.5fr_1fr_1.2fr] py-3 px-6 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide'>
           <p>#</p>
           <p>Patient</p>
           <p>Age</p>
           <p>Date & Time</p>
           <p>Doctor</p>
           <p>Fees</p>
-          <p>Actions</p>
+          <p>Status</p>
         </div>
 
-        {appointments.map((item, index) => (
-          <div className='flex flex-wrap justify-between max-sm:gap-2 sm:grid sm:grid-cols-[0.5fr_3fr_1fr_3fr_3fr_1fr_1fr] items-center text-gray-500 py-3 px-6 border-b hover:bg-gray-50' key={index} >
-            <p className='max-sm:hidden' >{index + 1} </p>
-            <div className='flex items-center gap-2' >
-              <img className='w-8 rounded-full' src={item.userData.image} alt="" /> <p>{item.userData.name} </p>
-            </div>
-            <p className='max-sm:hidden' >{calculateAge(item.userData.dob)} </p>
-            <p>{slotDateFormat(item.slotDate)},{item.slotTime} </p>
-            <div className='flex items-center gap-2' >
-              <img className='w-8 rounded-full bg-gray-200' src={item.docData.image} alt="" /> <p>{item.docData.name} </p>
-            </div>
-            <p>{currency}{item.amount} </p>
-            {
-              item.cancelled
-                ? <p className='text-red-400 text-xs font-medium' >Cancelled</p>
-                : item.isCompleted
-                  ? <p className='text-green-500 text-xs font-medium' >Completed</p>
-                  : <img onClick={() => cancelAppointment(item._id)} className='w-10 cursor-pointer' src={assets.cancel_icon} alt="" />
-            }
-
+        {appointments.length === 0 ? (
+          <div className='text-center py-16 text-gray-400'>
+            <p className='text-4xl mb-3'>📅</p>
+            <p className='font-medium'>No appointments yet</p>
           </div>
-        ))}
+        ) : (
+          appointments.map((item, index) => (
+            <div
+              key={index}
+              className='flex flex-wrap gap-2 sm:grid sm:grid-cols-[0.5fr_2.5fr_0.8fr_2.5fr_2.5fr_1fr_1.2fr] items-center text-sm text-gray-600 py-3.5 px-6 border-b border-gray-50 hover:bg-indigo-50/30 transition-colors'
+            >
+              <p className='hidden sm:block text-gray-400 font-medium'>{index + 1}</p>
 
+              <div className='flex items-center gap-2.5'>
+                <img className='w-8 h-8 rounded-full object-cover border border-gray-100' src={item.userData.image} alt="" />
+                <p className='font-medium text-gray-800 truncate'>{item.userData.name}</p>
+              </div>
+
+              <p className='hidden sm:block text-gray-500'>{calculateAge(item.userData.dob)} yrs</p>
+
+              <p className='text-gray-500 text-xs sm:text-sm'>
+                {slotDateFormat(item.slotDate)}<br className='sm:hidden' />
+                <span className='text-gray-400'> {item.slotTime}</span>
+              </p>
+
+              <div className='flex items-center gap-2.5'>
+                <img className='w-8 h-8 rounded-full object-cover bg-gray-100 border border-gray-100' src={item.docData.image} alt="" />
+                <p className='font-medium text-gray-700 truncate'>{item.docData.name}</p>
+              </div>
+
+              <p className='font-semibold text-gray-800'>{currency}{item.amount}</p>
+
+              <StatusBadge item={item} />
+            </div>
+          ))
+        )}
       </div>
     </div>
   )

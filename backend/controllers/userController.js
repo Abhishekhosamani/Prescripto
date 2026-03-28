@@ -137,6 +137,10 @@ const bookAppointment = async (req, res) => {
 
         const docData = await doctorModel.findById(docId).select('-password')
 
+        if (!docData) {
+            return res.json({ success: false, message: "Doctor not found" })
+        }
+
         if (!docData.available) {
             return res.json({ success: false, message: "Doctor not available" })
         }
@@ -157,13 +161,18 @@ const bookAppointment = async (req, res) => {
 
         const userData = await userModel.findById(userId).select('-password')
 
-        delete docData.slots_booked
+        if (!userData) {
+            return res.json({ success: false, message: "User not found. Please log out and register again." })
+        }
+
+        const docDataPlain = docData.toObject()
+        delete docDataPlain.slots_booked
 
         const appointmentData = {
             userId,
             docId,
             userData,
-            docData,
+            docData: docDataPlain,
             amount: docData.fees,
             slotTime,
             slotDate,
@@ -237,15 +246,15 @@ const cancelAppointment = async (req, res) => {
     }
 }
 
-const razorpayInstance = new razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORRAY_KEY_SECRET
-})
-
 // API to make payment of appointment using razorpay
 const paymentRazorpay = async (req, res) => {
 
     try {
+
+        const razorpayInstance = new razorpay({
+            key_id: process.env.RAZORPAY_KEY_ID,
+            key_secret: process.env.RAZORPAY_KEY_SECRET
+        })
 
         const { appointmentId } = req.body
 
@@ -278,6 +287,11 @@ const paymentRazorpay = async (req, res) => {
 const verifyRazorpay = async (req, res) => {
 
     try {
+
+        const razorpayInstance = new razorpay({
+            key_id: process.env.RAZORPAY_KEY_ID,
+            key_secret: process.env.RAZORPAY_KEY_SECRET
+        })
 
         const {razorpay_order_id} = req.body
         const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id)
