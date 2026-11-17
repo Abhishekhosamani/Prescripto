@@ -1,6 +1,6 @@
 import validator from "validator"
 import bcrypt from "bcrypt"
-import { v2 as cloudinary } from "cloudinary"
+import { cloudinary, connectCloudinary } from "../config/cloudinary.js"
 import doctorModel from "../models/doctorModel.js"
 import jwt from "jsonwebtoken"
 import appointmentModel from "../models/appointmentModel.js"
@@ -41,9 +41,18 @@ const addDoctor = async (req, res) => {
         const salt = await bcrypt.genSalt(10)
         const hashedPassword = await bcrypt.hash(password, salt)
 
-        const currentConfig = cloudinary.config()
+        let currentConfig = cloudinary.config()
         if (!currentConfig.cloud_name || !currentConfig.api_key || !currentConfig.api_secret) {
-            console.error("Doctor image upload failed: Cloudinary configuration is incomplete on the server.")
+            connectCloudinary()
+            currentConfig = cloudinary.config()
+        }
+
+        if (!currentConfig.cloud_name || !currentConfig.api_key || !currentConfig.api_secret) {
+            console.error("Doctor image upload failed: Cloudinary configuration is incomplete on the server.", {
+                hasCloudName: Boolean(currentConfig.cloud_name),
+                hasApiKey: Boolean(currentConfig.api_key),
+                hasApiSecret: Boolean(currentConfig.api_secret)
+            })
             return res.json({ success: false, message: "Image upload service is not configured on the server" })
         }
 

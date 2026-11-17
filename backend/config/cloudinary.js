@@ -1,6 +1,7 @@
 import { v2 as cloudinary } from 'cloudinary'
+import 'dotenv/config'
 
-const connectCloudinary = () => {
+const configureCloudinary = () => {
     const cloudName = process.env.CLOUDINARY_NAME || process.env.CLOUDINARY_CLOUD_NAME
     const apiKey = process.env.CLOUDINARY_API_KEY
     const apiSecret = process.env.CLOUDINARY_SECRET_KEY || process.env.CLOUDINARY_API_SECRET
@@ -12,9 +13,16 @@ const connectCloudinary = () => {
 
     cloudinary.config(configObj)
 
-    // Configuration validation without exposing secrets
     const currentConfig = cloudinary.config()
-    const isConfigured = Boolean(currentConfig.cloud_name && currentConfig.api_key && currentConfig.api_secret)
+    return Boolean(currentConfig.cloud_name && currentConfig.api_key && currentConfig.api_secret)
+}
+
+// Ensure Cloudinary is configured as soon as this module is imported
+configureCloudinary()
+
+const connectCloudinary = () => {
+    const isConfigured = configureCloudinary()
+    const currentConfig = cloudinary.config()
 
     if (isConfigured) {
         console.log(`Cloudinary configured successfully (cloud_name: "${currentConfig.cloud_name}")`)
@@ -29,4 +37,5 @@ const connectCloudinary = () => {
     return isConfigured
 }
 
+export { cloudinary, connectCloudinary }
 export default connectCloudinary
