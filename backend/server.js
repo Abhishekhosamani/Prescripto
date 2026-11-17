@@ -2,7 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import 'dotenv/config'
 import connectDB from './config/mongodb.js'
-import connectCloudinary from './config/cloudinary.js'
+import connectCloudinary, { cloudinary } from './config/cloudinary.js'
 import adminRouter from './routes/adminRoute.js'
 import doctorRouter from './routes/doctorRoute.js'
 import userRouter from './routes/userRoute.js'
@@ -63,7 +63,14 @@ app.get('/', (req, res) => {
 })
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', uptime: process.uptime() })
+  const c = cloudinary.config()
+  res.status(200).json({
+    status: 'ok',
+    uptime: process.uptime(),
+    commit: (process.env.RENDER_GIT_COMMIT || 'unknown').slice(0, 7),
+    instance: process.env.RENDER_INSTANCE_ID || 'local',
+    cloudinaryConfigured: Boolean(c.cloud_name && c.api_key && c.api_secret)
+  })
 })
 
 // global error handler

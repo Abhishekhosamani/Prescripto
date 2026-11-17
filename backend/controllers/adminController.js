@@ -51,7 +51,9 @@ const addDoctor = async (req, res) => {
             console.error("Doctor image upload failed: Cloudinary configuration is incomplete on the server.", {
                 hasCloudName: Boolean(currentConfig.cloud_name),
                 hasApiKey: Boolean(currentConfig.api_key),
-                hasApiSecret: Boolean(currentConfig.api_secret)
+                hasApiSecret: Boolean(currentConfig.api_secret),
+                commit: (process.env.RENDER_GIT_COMMIT || 'unknown').slice(0, 7),
+                instance: process.env.RENDER_INSTANCE_ID || 'local'
             })
             return res.json({ success: false, message: "Image upload service is not configured on the server" })
         }
