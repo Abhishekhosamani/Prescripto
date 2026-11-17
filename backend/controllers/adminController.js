@@ -41,13 +41,21 @@ const addDoctor = async (req, res) => {
         const salt = await bcrypt.genSalt(10)
         const hashedPassword = await bcrypt.hash(password, salt)
 
-        if (!process.env.CLOUDINARY_NAME && !process.env.CLOUDINARY_CLOUD_NAME) {
-            return res.json({ success: false, message: "Cloudinary cloud name is not configured on the server" })
+        const currentConfig = cloudinary.config()
+        if (!currentConfig.cloud_name || !currentConfig.api_key || !currentConfig.api_secret) {
+            console.error("Doctor image upload failed: Cloudinary configuration is incomplete on the server.")
+            return res.json({ success: false, message: "Image upload service is not configured on the server" })
         }
 
-        // upload image to cloudinary
-        const imageUpload = await cloudinary.uploader.upload(imageFile.path, {resource_type:"image"})
-        const imageUrl = imageUpload.secure_url
+        let imageUrl
+        try {
+            // upload image to cloudinary
+            const imageUpload = await cloudinary.uploader.upload(imageFile.path, {resource_type:"image"})
+            imageUrl = imageUpload.secure_url
+        } catch (uploadError) {
+            console.error("Cloudinary upload failed:", uploadError.message || uploadError)
+            return res.json({ success: false, message: "Failed to upload doctor image. Please try again." })
+        }
 
         const doctorData = {
             name,

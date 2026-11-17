@@ -128,13 +128,20 @@ const updateProfile = async (req, res) => {
         }
 
         if (imageFile) {
-            if (!process.env.CLOUDINARY_NAME && !process.env.CLOUDINARY_CLOUD_NAME) {
-                return res.json({ success: false, message: "Cloudinary cloud name is not configured on the server" })
+            const currentConfig = cloudinary.config()
+            if (!currentConfig.cloud_name || !currentConfig.api_key || !currentConfig.api_secret) {
+                console.error("Profile image upload failed: Cloudinary configuration is incomplete on the server.")
+                return res.json({ success: false, message: "Image upload service is not configured on the server" })
             }
 
-            // upload image to cloudinary
-            const imageUpload = await cloudinary.uploader.upload(imageFile.path, { resource_type: 'image' })
-            updateData.image = imageUpload.secure_url
+            try {
+                // upload image to cloudinary
+                const imageUpload = await cloudinary.uploader.upload(imageFile.path, { resource_type: 'image' })
+                updateData.image = imageUpload.secure_url
+            } catch (uploadError) {
+                console.error("Cloudinary upload failed:", uploadError.message || uploadError)
+                return res.json({ success: false, message: "Failed to upload image. Please try again." })
+            }
         }
 
         // Single database update avoiding redundant queries and avoiding field overwrite

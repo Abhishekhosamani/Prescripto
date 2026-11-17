@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken"
+import fs from "fs"
 
 // user authentication middleware
 const authUser = async (req, res, next) => {
@@ -6,6 +7,7 @@ const authUser = async (req, res, next) => {
 
          const {token} = req.headers
          if(!token) {
+            if (req.file && req.file.path) fs.unlink(req.file.path, () => {})
             return res.json({success:false, message:'Not Authorized Login Again'})
          }
          const token_decode = jwt.verify(token, process.env.JWT_SECRET)
@@ -14,6 +16,7 @@ const authUser = async (req, res, next) => {
          next()
 
     } catch (error) {
+        if (req.file && req.file.path) fs.unlink(req.file.path, () => {})
         console.log(error)
         res.json({success:false, message:error.message})
     }

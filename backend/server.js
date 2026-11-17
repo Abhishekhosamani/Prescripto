@@ -77,8 +77,8 @@ app.use((err, req, res, next) => {
 
 const startServer = async () => {
   try {
-    await connectDB()
     connectCloudinary()
+    await connectDB()
     app.listen(port, () => console.log("Server Started", port))
   } catch (error) {
     console.error("Server startup aborted due to database connection error:", error.message)
