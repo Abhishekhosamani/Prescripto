@@ -5,24 +5,31 @@ import doctorModel from "../models/doctorModel.js"
 import jwt from "jsonwebtoken"
 import appointmentModel from "../models/appointmentModel.js"
 import userModel from "../models/userModel.js"
+import fs from "fs"
 
 
 
 // API for adding doctor 
 const addDoctor = async (req, res) => {
+    const imageFile = req.file
     try{
 
         const {name, email, password, speciality, degree, experience, about, fees, address} = req.body
-        const imageFile = req.file
 
         // checking for all data to add doctor
-        if(!name || !email || !password || !speciality || !degree || !experience || !about || !fees || !address) {
+        if(!name || !email || !password || !speciality || !degree || !experience || !about || !fees || !address || !imageFile) {
             return res.json({success:false, message:"Missing Details"})
         }
 
-        // validatin email format
+        // validating email format
         if(!validator.isEmail(email)) {
             return res.json({success:false, message:"Please enter a valid email"})
+        }
+
+        // checking existing doctor
+        const existingDoc = await doctorModel.findOne({ email })
+        if (existingDoc) {
+            return res.json({ success: false, message: "Doctor with this email already exists" })
         }
 
         // validating strong password
@@ -33,6 +40,10 @@ const addDoctor = async (req, res) => {
         // hashing doctor password
         const salt = await bcrypt.genSalt(10)
         const hashedPassword = await bcrypt.hash(password, salt)
+
+        if (!process.env.CLOUDINARY_NAME && !process.env.CLOUDINARY_CLOUD_NAME) {
+            return res.json({ success: false, message: "Cloudinary cloud name is not configured on the server" })
+        }
 
         // upload image to cloudinary
         const imageUpload = await cloudinary.uploader.upload(imageFile.path, {resource_type:"image"})
@@ -60,6 +71,10 @@ const addDoctor = async (req, res) => {
     } catch (error) {
         console.log(error)
         res.json({success:false, message:error.message})
+    } finally {
+        if (imageFile && imageFile.path) {
+            fs.unlink(imageFile.path, () => {})
+        }
     }
 }
 
@@ -146,15 +161,18 @@ const adminDashboard = async (req, res) => {
     
     try {
 
-        const doctors = await doctorModel.find({})
-        const users = await userModel.find({})
-        const appointments = await appointmentModel.find({})
+        const [doctorsCount, usersCount, appointmentsCount, latestAppointments] = await Promise.all([
+            doctorModel.countDocuments(),
+            userModel.countDocuments(),
+            appointmentModel.countDocuments(),
+            appointmentModel.find({}).sort({ date: -1 }).limit(5)
+        ])
 
         const dashData = {
-            doctors: doctors.length,
-            appointments: appointments.length,
-            patients: users.length,
-            latestAppointments: appointments.reverse().slice(0, 5)
+            doctors: doctorsCount,
+            appointments: appointmentsCount,
+            patients: usersCount,
+            latestAppointments
         }
 
         res.json({success: true, dashData})

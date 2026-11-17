@@ -8,15 +8,26 @@ const MyProfile = () => {
   const { userData, setUserData, token, backendUrl, loadUserProfileData } = useContext(AppContext)
   const [isEdit, setIsEdit] = useState(false)
   const [image, setImage] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   const updateUserProfileData = async () => {
+    if (loading) return
+    if (!userData.name || !userData.name.trim()) {
+      return toast.error('Name cannot be empty')
+    }
+
+    if (image && image.size > 5 * 1024 * 1024) {
+      return toast.error('Image size must be less than 5MB')
+    }
+
+    setLoading(true)
     try {
       const formData = new FormData()
       formData.append('name', userData.name)
-      formData.append('phone', userData.phone)
-      formData.append('address', JSON.stringify(userData.address))
-      formData.append('gender', userData.gender)
-      formData.append('dob', userData.dob)
+      formData.append('phone', userData.phone || '')
+      formData.append('address', JSON.stringify(userData.address || { line1: '', line2: '' }))
+      formData.append('gender', userData.gender || 'Not Selected')
+      formData.append('dob', userData.dob || '')
       image && formData.append('image', image)
 
       const { data } = await axios.post(backendUrl + '/api/user/update-profile', formData, { headers: { token } })
@@ -30,7 +41,9 @@ const MyProfile = () => {
       }
     } catch (error) {
       console.log(error)
-      toast.error(error.message)
+      toast.error(error.response?.data?.message || error.message)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -58,7 +71,7 @@ const MyProfile = () => {
                     <img className='w-6' src={assets.upload_icon} alt="" />
                   </div>
                 </div>
-                <input onChange={(e) => setImage(e.target.files[0])} type="file" id="image" hidden />
+                <input onChange={(e) => setImage(e.target.files[0])} type="file" id="image" accept="image/*" hidden />
               </label>
             ) : (
               <img className='w-24 h-24 rounded-full object-cover border-4 border-white shadow-md' src={userData.image} alt="" />
@@ -167,13 +180,22 @@ const MyProfile = () => {
                 <>
                   <button
                     onClick={updateUserProfileData}
-                    className='bg-primary text-white px-8 py-2.5 rounded-full text-sm font-medium hover:opacity-90 hover:shadow-md transition-all'
+                    disabled={loading}
+                    className='bg-primary text-white px-8 py-2.5 rounded-full text-sm font-medium hover:opacity-90 hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2'
                   >
-                    Save Changes
+                    {loading ? (
+                      <>
+                        <span className='w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin'></span>
+                        Saving...
+                      </>
+                    ) : (
+                      'Save Changes'
+                    )}
                   </button>
                   <button
                     onClick={() => { setIsEdit(false); setImage(false) }}
-                    className='border border-gray-300 text-gray-600 px-8 py-2.5 rounded-full text-sm font-medium hover:bg-gray-50 transition-all'
+                    disabled={loading}
+                    className='border border-gray-300 text-gray-600 px-8 py-2.5 rounded-full text-sm font-medium hover:bg-gray-50 transition-all disabled:opacity-50'
                   >
                     Cancel
                   </button>

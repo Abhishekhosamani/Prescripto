@@ -9,11 +9,15 @@ const AppContextProvider = (props) => {
 
     const currencySymbol = '$'
     const currency = currencySymbol
-    const backendUrl = import.meta.env.VITE_BACKEND_URL
+    const backendUrl = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
 
     const [doctors, setDoctors] = useState(staticDoctors)
     const [isLiveData, setIsLiveData] = useState(false)
-    const [token, setToken] = useState(localStorage.getItem('token') ? localStorage.getItem('token') : false)
+    const [token, setToken] = useState(
+        localStorage.getItem('token') && localStorage.getItem('token') !== 'undefined' && localStorage.getItem('token') !== 'false'
+            ? localStorage.getItem('token')
+            : false
+    )
     const [userData, setUserData] = useState(false)
 
     const slotDateFormat = (slotDate) => {

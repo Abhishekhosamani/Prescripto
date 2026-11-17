@@ -6,6 +6,7 @@ import { v2 as cloudinary } from 'cloudinary'
 import doctorModel from '../models/doctorModel.js'
 import appointmentModel from '../models/appointmentModel.js'
 import razorpay from 'razorpay'
+import fs from 'fs'
 
 // API to register user
 const registerUser = async (req, res) => {
@@ -97,32 +98,57 @@ const getProfile = async (req, res) => {
 
 // API to update user profile
 const updateProfile = async (req, res) => {
+    const imageFile = req.file
     try {
 
         const { name, phone, address, dob, gender } = req.body
         const userId = req.userId
-        const imageFile = req.file
 
-        if (!name || !phone || !dob || !gender) {
-            return res.json({ success: false, message: "Data Missing" })
+        if (name !== undefined && (!name || !name.trim())) {
+            return res.json({ success: false, message: "Name cannot be empty" })
         }
 
-        await userModel.findByIdAndUpdate(userId, { name, phone, address, dob, gender })
+        const updateData = {}
+
+        if (name !== undefined) updateData.name = name.trim()
+        if (phone !== undefined) updateData.phone = phone
+        if (dob !== undefined) updateData.dob = dob
+        if (gender !== undefined) updateData.gender = gender
+
+        if (address !== undefined) {
+            let parsedAddress = address
+            if (typeof address === 'string') {
+                try {
+                    parsedAddress = JSON.parse(address)
+                } catch (parseError) {
+                    return res.json({ success: false, message: "Invalid address format: must be valid JSON" })
+                }
+            }
+            updateData.address = parsedAddress
+        }
 
         if (imageFile) {
+            if (!process.env.CLOUDINARY_NAME && !process.env.CLOUDINARY_CLOUD_NAME) {
+                return res.json({ success: false, message: "Cloudinary cloud name is not configured on the server" })
+            }
 
             // upload image to cloudinary
             const imageUpload = await cloudinary.uploader.upload(imageFile.path, { resource_type: 'image' })
-            const imageURL = imageUpload.secure_url
-
-            await userModel.findByIdAndUpdate(userId, { image: imageURL })
+            updateData.image = imageUpload.secure_url
         }
+
+        // Single database update avoiding redundant queries and avoiding field overwrite
+        await userModel.findByIdAndUpdate(userId, updateData)
 
         res.json({ success: true, message: "Profile Updated" })
 
     } catch (error) {
         console.log(error)
         res.json({ success: false, message: error.message })
+    } finally {
+        if (imageFile && imageFile.path) {
+            fs.unlink(imageFile.path, () => {})
+        }
     }
 }
 
@@ -219,24 +245,27 @@ const cancelAppointment = async (req, res) => {
 
         const appointmentData = await appointmentModel.findById(appointmentId)
 
+        if (!appointmentData) {
+            return res.json({ success: false, message: "Appointment not found" })
+        }
+
         // verify appointment user
-        if (appointmentData.userId !== userId) {
+        if (appointmentData.userId.toString() !== userId.toString()) {
             return res.json({ success: false, message: "Unauthorized action" })
         }
 
         await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
 
         // releasing doctor slot
-
         const { docId, slotDate, slotTime } = appointmentData
 
         const doctorData = await doctorModel.findById(docId)
 
-        let slots_booked = doctorData.slots_booked
-
-        slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime)
-
-        await doctorModel.findByIdAndUpdate(docId, { slots_booked })
+        if (doctorData && doctorData.slots_booked && doctorData.slots_booked[slotDate]) {
+            let slots_booked = doctorData.slots_booked
+            slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime)
+            await doctorModel.findByIdAndUpdate(docId, { slots_booked })
+        }
 
         res.json({ success: true, message: 'Appointment Cancelled' })
 

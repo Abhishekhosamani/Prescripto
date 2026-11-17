@@ -15,9 +15,12 @@ const Login = () => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const onSubmitHandler = async (event) => {
     event.preventDefault()
+    if (isSubmitting) return
+    setIsSubmitting(true)
 
     try {
 
@@ -47,6 +50,8 @@ const Login = () => {
 
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -75,7 +80,9 @@ const Login = () => {
           <p>Password</p>
           <input className='border border-zinc-300 rounded w-full p-2 mt-1' type="password" onChange={(e) => setPassword(e.target.value)} value={password} required />
         </div>
-        <button type='submit' className='bg-primary text-white w-full py-2 rounded-md text-base' >{state === 'Sign Up' ? "Create Account" : "Login"}</button>
+        <button type='submit' disabled={isSubmitting} className='bg-primary text-white w-full py-2 rounded-md text-base disabled:opacity-50 disabled:cursor-not-allowed' >
+          {isSubmitting ? 'Please wait...' : (state === 'Sign Up' ? "Create Account" : "Login")}
+        </button>
         {
           state === "Sign Up" 
           ? <p>Already have an account? <span onClick={()=>setState('Login')} className='text-primary underline cursor-pointer' >Login here</span></p>

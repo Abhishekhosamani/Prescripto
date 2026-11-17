@@ -65,10 +65,11 @@ const ChatBot = () => {
           setRecommendation(data.recommendation)
         }
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I had trouble processing that. Please try again.' }])
+        setMessages(prev => [...prev, { role: 'assistant', content: data.message || 'Sorry, I had trouble processing that. Please try again.' }])
       }
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Connection error. Please check your internet and try again.' }])
+    } catch (error) {
+      const serverMsg = error?.response?.data?.message || 'Connection error. Please check your internet and try again.'
+      setMessages(prev => [...prev, { role: 'assistant', content: serverMsg }])
     } finally {
       setLoading(false)
     }

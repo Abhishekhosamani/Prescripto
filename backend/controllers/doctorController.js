@@ -88,7 +88,7 @@ const appointmentComplete = async (req, res) => {
 
         const appointmentData = await appointmentModel.findById(appointmentId)
 
-        if (appointmentData && appointmentData.docId === docId) {
+        if (appointmentData && appointmentData.docId.toString() === docId.toString()) {
             
             await appointmentModel.findByIdAndUpdate(appointmentId, {isCompleted: true})
             return res.json({success: true, message: 'Appointment Completed'})
@@ -113,9 +113,19 @@ const appointmentCancel = async (req, res) => {
 
         const appointmentData = await appointmentModel.findById(appointmentId)
 
-        if (appointmentData && appointmentData.docId === docId) {
+        if (appointmentData && appointmentData.docId.toString() === docId.toString()) {
             
             await appointmentModel.findByIdAndUpdate(appointmentId, {cancelled: true})
+
+            // releasing doctor slot
+            const { slotDate, slotTime } = appointmentData
+            const doctorData = await doctorModel.findById(docId)
+            if (doctorData && doctorData.slots_booked && doctorData.slots_booked[slotDate]) {
+                let slots_booked = doctorData.slots_booked
+                slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime)
+                await doctorModel.findByIdAndUpdate(docId, { slots_booked })
+            }
+
             return res.json({success: true, message: 'Appointment Cancelled'})
 
         } else {

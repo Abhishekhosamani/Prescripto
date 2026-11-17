@@ -7,6 +7,8 @@ import { useNavigate } from 'react-router-dom'
 const MyAppointments = () => {
   const { backendUrl, token, getDoctorsData } = useContext(AppContext)
   const [appointments, setAppointments] = useState([])
+  const [cancellingId, setCancellingId] = useState(null)
+  const [payingId, setPayingId] = useState(null)
   const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
   const navigate = useNavigate()
 
@@ -28,6 +30,8 @@ const MyAppointments = () => {
   }
 
   const cancelAppointment = async (appointmentId) => {
+    if (cancellingId) return
+    setCancellingId(appointmentId)
     try {
       const { data } = await axios.post(backendUrl + '/api/user/cancel-appointment', { appointmentId }, { headers: { token } })
       if (data.success) {
@@ -40,6 +44,8 @@ const MyAppointments = () => {
     } catch (error) {
       console.log(error)
       toast.error(error.message)
+    } finally {
+      setCancellingId(null)
     }
   }
 
@@ -73,6 +79,8 @@ const MyAppointments = () => {
   }
 
   const appointmentRazorpay = async (appointmentId) => {
+    if (payingId) return
+    setPayingId(appointmentId)
     try {
       const { data } = await axios.post(backendUrl + '/api/user/payment-razorpay', { appointmentId }, { headers: { token } })
       if (data.success) {
@@ -81,6 +89,8 @@ const MyAppointments = () => {
     } catch (error) {
       console.log(error)
       toast.error(error.message || 'Failed to initiate payment')
+    } finally {
+      setPayingId(null)
     }
   }
 
@@ -142,17 +152,19 @@ const MyAppointments = () => {
                 {!item.cancelled && !item.payment && !item.isCompleted && (
                   <button
                     onClick={() => appointmentRazorpay(item._id)}
-                    className='text-xs font-medium px-5 py-2 rounded-full border border-primary text-primary hover:bg-primary hover:text-white transition-all duration-200'
+                    disabled={payingId === item._id}
+                    className='text-xs font-medium px-5 py-2 rounded-full border border-primary text-primary hover:bg-primary hover:text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
                   >
-                    Pay Online
+                    {payingId === item._id ? 'Processing...' : 'Pay Online'}
                   </button>
                 )}
                 {!item.cancelled && !item.isCompleted && (
                   <button
                     onClick={() => cancelAppointment(item._id)}
-                    className='text-xs font-medium px-5 py-2 rounded-full border border-gray-200 text-gray-500 hover:border-red-400 hover:text-red-500 transition-all duration-200'
+                    disabled={cancellingId === item._id}
+                    className='text-xs font-medium px-5 py-2 rounded-full border border-gray-200 text-gray-500 hover:border-red-400 hover:text-red-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
                   >
-                    Cancel
+                    {cancellingId === item._id ? 'Cancelling...' : 'Cancel'}
                   </button>
                 )}
               </div>

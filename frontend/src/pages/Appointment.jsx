@@ -16,6 +16,7 @@ const Appointment = () => {
   const [docSlots, setDocSlots] = useState([])
   const [slotIndex, setSlotIndex] = useState(0)
   const [slotTime, setSlotTime] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const fetchDocInfo = async () => {
     const docInfo = doctors.find(doc => doc._id === docId)
@@ -83,6 +84,9 @@ const Appointment = () => {
       return toast.warn('No slots available for the selected day')
     }
 
+    if (isSubmitting) return
+    setIsSubmitting(true)
+
     try {
       const date = docSlots[slotIndex][0].dateTime
       let day = date.getDate()
@@ -106,6 +110,8 @@ const Appointment = () => {
     } catch (error) {
       console.log(error)
       toast.error(error.message)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -192,9 +198,10 @@ const Appointment = () => {
         {/* Book Button */}
         <button
           onClick={bookAppointment}
-          className='mt-6 bg-primary text-white text-sm font-medium px-10 py-3 rounded-full hover:opacity-90 hover:shadow-lg transition-all duration-300'
+          disabled={isSubmitting}
+          className='mt-6 bg-primary text-white text-sm font-medium px-10 py-3 rounded-full hover:opacity-90 hover:shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed'
         >
-          Book an Appointment
+          {isSubmitting ? 'Booking...' : 'Book an Appointment'}
         </button>
       </div>
 
