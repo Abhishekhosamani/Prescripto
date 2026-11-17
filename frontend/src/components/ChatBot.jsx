@@ -25,6 +25,7 @@ const ChatBot = () => {
   const [recommendation, setRecommendation] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
+  const chatIdRef = useRef(0)
   const navigate = useNavigate()
   const { backendUrl } = useContext(AppContext)
 
@@ -43,15 +44,17 @@ const ChatBot = () => {
     if (!text || loading) return
 
     const userMsg = { role: 'user', content: text }
-    const updatedMessages = [...messages.filter(m => m.role !== 'assistant' || messages.indexOf(m) > 0), userMsg]
     // Build API-compatible history (exclude the initial greeting which isn't from the API)
     const apiMessages = [
       ...messages.slice(1).map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: text },
     ]
 
+    const chatId = chatIdRef.current
+
     setMessages(prev => [...prev, userMsg])
     setInput('')
+    setRecommendation(null)
     setLoading(true)
 
     try {
@@ -59,19 +62,25 @@ const ChatBot = () => {
         messages: apiMessages,
       })
 
+      // Ignore responses that belong to a chat the user has since reset
+      if (chatId !== chatIdRef.current) return
+
       if (data.success) {
         setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
-        if (data.recommendation) {
-          setRecommendation(data.recommendation)
-        }
+        // Always reflect the latest response: a reply without a valid recommendation hides the card
+        const rec = data.recommendation
+        setRecommendation(rec && typeof rec.speciality === 'string' && rec.speciality.trim() ? rec : null)
       } else {
         setMessages(prev => [...prev, { role: 'assistant', content: data.message || 'Sorry, I had trouble processing that. Please try again.' }])
+        setRecommendation(null)
       }
     } catch (error) {
+      if (chatId !== chatIdRef.current) return
       const serverMsg = error?.response?.data?.message || 'Connection error. Please check your internet and try again.'
       setMessages(prev => [...prev, { role: 'assistant', content: serverMsg }])
+      setRecommendation(null)
     } finally {
-      setLoading(false)
+      if (chatId === chatIdRef.current) setLoading(false)
     }
   }
 
@@ -90,6 +99,8 @@ const ChatBot = () => {
   }
 
   const handleReset = () => {
+    chatIdRef.current += 1
+    setLoading(false)
     setMessages([
       {
         role: 'assistant',

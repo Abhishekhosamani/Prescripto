@@ -28,6 +28,8 @@ Rules:
 - If you need more info, just ask a follow-up question without any JSON
 - Always remind users this is for guidance only and not a medical diagnosis`
 
+const SPECIALITIES = ['General physician', 'Gynecologist', 'Dermatologist', 'Pediatrician', 'Neurologist', 'Gastroenterologist']
+
 const analyzeSymptoms = async (req, res) => {
   try {
     const { messages } = req.body
@@ -67,19 +69,28 @@ const analyzeSymptoms = async (req, res) => {
       return res.status(502).json({ success: false, message: 'Received empty response from AI service' })
     }
 
-    // Extract recommendation JSON if present
-    const recMatch = text.match(/RECOMMENDATION:(\{[^}]+\})/)
+    // Extract the LAST valid recommendation from the visible reply only.
+    // Reasoning blocks (<think>...</think>) are removed first so recommendations
+    // mentioned while reasoning about earlier turns are never picked up.
+    const visibleText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<\/?think>/gi, '').trim()
+    const recRegex = /RECOMMENDATION:\s*(\{[^}]*\})/g
     let recommendation = null
-    let replyText = text
 
-    if (recMatch) {
+    for (const match of visibleText.matchAll(recRegex)) {
       try {
-        recommendation = JSON.parse(recMatch[1])
-        replyText = text.replace(/RECOMMENDATION:\{[^}]+\}/, '').trim()
+        const parsed = JSON.parse(match[1])
+        const speciality = typeof parsed.speciality === 'string'
+          ? SPECIALITIES.find(sp => sp.toLowerCase() === parsed.speciality.trim().toLowerCase())
+          : undefined
+        if (speciality) {
+          recommendation = { speciality, reason: typeof parsed.reason === 'string' ? parsed.reason.trim() : '' }
+        }
       } catch {
-        // If JSON parse fails, just show the text
+        // Ignore malformed JSON; a later valid block may still exist
       }
     }
+
+    const replyText = visibleText.replace(/RECOMMENDATION:\s*\{[^}]*\}?/g, '').trim() || visibleText
 
     return res.json({ success: true, reply: replyText, recommendation })
   } catch (error) {
