@@ -16,7 +16,8 @@ const port = process.env.PORT || 4000
 const defaultOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
-  'https://prescripto-1-sw58.onrender.com'
+  'https://prescripto-1-sw58.onrender.com',
+  'https://prescripto-admin-fjj8.onrender.com'
 ]
 
 const envOrigins = process.env.ALLOWED_ORIGINS
@@ -58,31 +59,31 @@ app.use('/api/chatbot', chatbotRouter)
 
 // health check endpoints
 app.get('/', (req, res) => {
-    res.send('API WORKING')
+  res.send('API WORKING')
 })
 
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', uptime: process.uptime() })
+  res.status(200).json({ status: 'ok', uptime: process.uptime() })
 })
 
 // global error handler
 app.use((err, req, res, next) => {
-    console.error('Unhandled Server Error:', err)
-    res.status(err.status || 500).json({
-        success: false,
-        message: err.message || 'Internal Server Error'
-    })
+  console.error('Unhandled Server Error:', err)
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal Server Error'
+  })
 })
 
 const startServer = async () => {
-    try {
-        await connectDB()
-        connectCloudinary()
-        app.listen(port, () => console.log("Server Started", port))
-    } catch (error) {
-        console.error("Server startup aborted due to database connection error:", error.message)
-        process.exit(1)
-    }
+  try {
+    await connectDB()
+    connectCloudinary()
+    app.listen(port, () => console.log("Server Started", port))
+  } catch (error) {
+    console.error("Server startup aborted due to database connection error:", error.message)
+    process.exit(1)
+  }
 }
 
 startServer()
