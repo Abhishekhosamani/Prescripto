@@ -202,19 +202,34 @@ export const releaseSlot = async (docId, slotDate, slotTime, { excludeAppointmen
  * Returns the appointment as it was before cancelling, or null if it was
  * already cancelled / not found.
  */
+export const PAID_CANCELLATION_MESSAGE = 'This appointment has been paid and cannot be cancelled through the application yet. Please contact support for assistance.'
+
+/**
+ * Paid appointments (payment === true, set only by a verified Razorpay payment and
+ * cleared by every refund state) cannot be cancelled through the application until a
+ * refund flow exists. The rule is part of the same atomic update, so a payment that is
+ * confirmed concurrently can never be cancelled, and a rejected request writes nothing.
+ * Returns { outcome: 'cancelled' | 'paid' | 'already_cancelled' | 'not_found', appointment }.
+ */
 export const cancelAndReleaseSlot = async (appointmentId) => {
     const before = await appointmentModel.findOneAndUpdate(
-        { _id: appointmentId, cancelled: { $ne: true } },
+        { _id: appointmentId, cancelled: { $ne: true }, payment: { $ne: true } },
         { $set: { cancelled: true, slotLocked: false, status: 'cancelled' } },
         { returnDocument: 'before' }
     )
-    if (!before) return null
+    if (!before) {
+        // read-only: explain why nothing was cancelled
+        const current = await appointmentModel.findById(appointmentId).select('cancelled payment').lean()
+        if (!current) return { outcome: 'not_found', appointment: null }
+        if (current.cancelled !== true && current.payment === true) return { outcome: 'paid', appointment: null }
+        return { outcome: 'already_cancelled', appointment: null }
+    }
 
     if (before.paymentStatus === 'pending') {
         await appointmentModel.updateOne({ _id: before._id, paymentStatus: 'pending' }, { $set: { paymentStatus: 'unpaid' } })
     }
     await releaseSlot(before.docId, before.slotDate, before.slotTime, { excludeAppointmentId: before._id })
-    return before
+    return { outcome: 'cancelled', appointment: before }
 }
 
 /**

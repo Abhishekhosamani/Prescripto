@@ -8,7 +8,7 @@ import appointmentModel from '../models/appointmentModel.js'
 import razorpay from 'razorpay'
 import fs from 'fs'
 import {
-    getReservationMinutes, isValidSlotInput, canonicalSlotDate, canonicalSlotTime, claimSlot, releaseSlot, cancelAndReleaseSlot,
+    getReservationMinutes, isValidSlotInput, canonicalSlotDate, canonicalSlotTime, claimSlot, releaseSlot, cancelAndReleaseSlot, PAID_CANCELLATION_MESSAGE,
     failPendingReservation, createRazorpayOrder, getRazorpay, verifyPaymentSignature,
     verifyWebhookSignature, settlePaidOrder, syncRefund
 } from '../utils/slotReservation.js'
@@ -312,8 +312,12 @@ const cancelAppointment = async (req, res) => {
             return res.json({ success: false, message: "Unauthorized action" })
         }
 
-        // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it)
-        await cancelAndReleaseSlot(appointmentId)
+        // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it).
+        // Paid appointments are refused inside the same atomic update (no refund flow yet).
+        const result = await cancelAndReleaseSlot(appointmentId)
+        if (result.outcome === 'paid') {
+            return res.json({ success: false, message: PAID_CANCELLATION_MESSAGE })
+        }
 
         res.json({ success: true, message: 'Appointment Cancelled' })
 

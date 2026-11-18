@@ -3,6 +3,7 @@ import { AppContext } from '../context/AppContext'
 import axios from 'axios'
 import { toast } from 'react-toastify'
 import { useNavigate } from 'react-router-dom'
+import { canCancelAppointment, isPaidAppointment, PAID_CANCELLATION_NOTICE } from '../utils/appointmentRules'
 
 const MyAppointments = () => {
   const { backendUrl, token, getDoctorsData } = useContext(AppContext)
@@ -182,7 +183,7 @@ const MyAppointments = () => {
                     {payingId === item._id ? 'Processing...' : 'Pay Online'}
                   </button>
                 )}
-                {!item.cancelled && !item.isCompleted && (
+                {canCancelAppointment(item) && (
                   <button
                     onClick={() => cancelAppointment(item._id)}
                     disabled={cancellingId === item._id}
@@ -192,6 +193,9 @@ const MyAppointments = () => {
                   </button>
                 )}
               </div>
+              {!item.cancelled && !item.isCompleted && isPaidAppointment(item) && (
+                <p className='mt-3 text-xs text-gray-500'>ℹ️ {PAID_CANCELLATION_NOTICE}</p>
+              )}
             </div>
           </div>
         ))}

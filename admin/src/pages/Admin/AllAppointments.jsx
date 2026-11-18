@@ -1,6 +1,7 @@
 import React, { useContext, useEffect } from 'react'
 import { AdminContext } from '../../context/AdminContext'
 import { AppContext } from '../../context/AppContext'
+import { canCancelAppointment, PAID_CANCELLATION_NOTICE } from '../../utils/appointmentRules'
 
 const AllAppointments = () => {
   const { aToken, appointments, getAllAppointments, cancelAppointment } = useContext(AdminContext)
@@ -13,6 +14,12 @@ const AllAppointments = () => {
   const StatusBadge = ({ item }) => {
     if (item.cancelled) return <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-500 border border-red-100'>Cancelled</span>
     if (item.isCompleted) return <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-600 border border-green-100'>Completed</span>
+    // paid appointments cannot be cancelled in the app (no refund flow yet)
+    if (!canCancelAppointment(item)) return (
+      <span title={PAID_CANCELLATION_NOTICE} className='px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-500 border border-blue-100 cursor-help'>
+        Paid · no cancel
+      </span>
+    )
     if (item.status === 'pending' && item.paymentMethod === 'online' && !item.payment) return (
       <div className='flex items-center gap-1.5'>
         <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-50 text-yellow-600 border border-yellow-200'>Awaiting Payment</span>

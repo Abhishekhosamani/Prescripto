@@ -624,16 +624,24 @@ await test('X3. Webhook vs frontend verify simultaneously (x5): confirmed once, 
     }
 })
 
-await test('X4. Cancellation vs payment simultaneously (x10): slot released, refund at most once, never active+refunded', async () => {
+await test('X4. Cancellation vs payment simultaneously (x10): exactly one wins; never cancelled-and-paid; refund at most once', async () => {
     for (let i = 0; i < 10; i++) {
         const doc = await mkDoctor(docN++)
         const r = await book(0, doc._id, D, '10:00 AM', 'online')
         const resp = payOrder(r.order.id)
-        await Promise.all([call(userCtl.cancelAppointment, { userId: uid(0), body: { appointmentId: String(r.appointmentId) } }), call(userCtl.verifyRazorpay, { userId: uid(0), body: resp })])
+        const [c] = await Promise.all([call(userCtl.cancelAppointment, { userId: uid(0), body: { appointmentId: String(r.appointmentId) } }), call(userCtl.verifyRazorpay, { userId: uid(0), body: resp })])
         const a = await appointmentModel.findById(r.appointmentId)
-        assert.equal(a.cancelled, true)
+        assert.ok(!(a.cancelled && a.payment), 'a paid appointment is never cancelled')
         assert.ok(refundsFor(resp.razorpay_payment_id) <= 1)
-        if (!a.payment) assert.equal(a.paymentStatus, 'refunded') // cancelled first -> refunded
+        if (a.payment) {
+            // payment confirmed first: the cancellation was refused, booking and slot intact
+            assert.equal(c.success, false); assert.equal(c.message, R.PAID_CANCELLATION_MESSAGE)
+            assert.equal(a.cancelled, false); assert.equal(a.status, 'confirmed'); assert.equal(a.slotLocked, true)
+            assert.equal(refundsFor(resp.razorpay_payment_id), 0)
+        } else {
+            // cancelled while still unpaid: the payment that arrived afterwards is refunded (late-payment path)
+            assert.equal(c.success, true); assert.equal(a.cancelled, true); assert.equal(a.paymentStatus, 'refunded')
+        }
         await assertSlotInvariant(doc._id)
     }
 })
@@ -1689,6 +1697,137 @@ await test('PF7. Explicit cancellation of the pending reservation releases the s
     assert.equal(a.cancelled, true); assert.equal(a.status, 'cancelled'); assert.equal(a.slotLocked, false)
     assert.deepEqual(await slotsOf(doc._id, D), [])
     assert.ok((await book(1, doc._id, D, '10:00 AM')).success)
+})
+
+// ======================= Paid appointments cannot be cancelled (no refund flow yet) =======================
+const cancelAs = {
+    patient: (appointmentId, userIndex = 0) => call(userCtl.cancelAppointment, { userId: uid(userIndex), body: { appointmentId: String(appointmentId) } }),
+    doctor: (appointmentId, docId) => call(docCtl.appointmentCancel, { docId: String(docId), body: { appointmentId: String(appointmentId) } }),
+    admin: (appointmentId) => call(adminCtl.appointmentCancel, { body: { appointmentId: String(appointmentId) } })
+}
+// online reservation paid and confirmed through the real verify path
+const paidAppointment = async () => {
+    const doc = await mkDoctor(docN++)
+    const r = await book(0, doc._id, D, '10:00 AM')
+    assert.ok((await call(userCtl.verifyRazorpay, { userId: uid(0), body: payOrder(r.order.id) })).success)
+    return { doc, id: r.appointmentId }
+}
+// legacy appointment paid through the old pay-online path (payment: true, no status field)
+const legacyPaidAppointment = async () => {
+    const doc = await mkDoctor(docN++)
+    await doctorModel.updateOne({ _id: doc._id }, { $set: { [`slots_booked.${D}`]: ['10:00 AM'] } })
+    const [id] = Object.values((await appointmentModel.collection.insertMany([{ userId: uid(0), docId: String(doc._id), slotDate: D, slotTime: '10:00 AM', userData: {}, docData: {}, amount: 500, date: Date.now(), cancelled: false, payment: true, isCompleted: false }])).insertedIds)
+    return { doc, id }
+}
+const stateOf = async (id, docId) => JSON.stringify([await appointmentModel.findById(id).lean(), (await doctorModel.findById(docId).lean()).slots_booked])
+
+await test('CP1. Unpaid appointment: patient cancellation succeeds and releases the slot', async () => {
+    const doc = await mkDoctor(docN++)
+    const r = await book(0, doc._id, D, '10:00 AM')
+    const c = await cancelAs.patient(r.appointmentId)
+    assert.deepEqual([c.success, c.message], [true, 'Appointment Cancelled'])
+    const a = await appointmentModel.findById(r.appointmentId)
+    assert.equal(a.cancelled, true); assert.equal(a.slotLocked, false); assert.equal(a.paymentStatus, 'unpaid')
+    assert.deepEqual(await slotsOf(doc._id, D), [])
+    assert.ok((await book(1, doc._id, D, '10:00 AM')).success)
+})
+
+await test('CP2. Paid appointment: patient cancellation rejected, no record or slot changes', async () => {
+    const { doc, id } = await paidAppointment()
+    const before = await stateOf(id, doc._id)
+    const c = await cancelAs.patient(id)
+    assert.deepEqual([c.success, c.message], [false, R.PAID_CANCELLATION_MESSAGE])
+    assert.equal(await stateOf(id, doc._id), before, 'appointment and slots_booked unchanged')
+    const a = await appointmentModel.findById(id)
+    assert.equal(a.cancelled, false); assert.equal(a.status, 'confirmed'); assert.equal(a.payment, true); assert.equal(a.slotLocked, true)
+    assert.equal((await book(1, doc._id, D, '10:00 AM')).success, false, 'slot still unavailable')
+})
+
+await test('CP3. Paid appointment: doctor cancellation rejected (online and legacy paid records)', async () => {
+    for (const make of [paidAppointment, legacyPaidAppointment]) {
+        const { doc, id } = await make()
+        const before = await stateOf(id, doc._id)
+        const c = await cancelAs.doctor(id, doc._id)
+        assert.deepEqual([c.success, c.message], [false, R.PAID_CANCELLATION_MESSAGE])
+        assert.equal(await stateOf(id, doc._id), before)
+    }
+})
+
+await test('CP4. Paid appointment: admin cancellation rejected (online and legacy paid records)', async () => {
+    for (const make of [paidAppointment, legacyPaidAppointment]) {
+        const { doc, id } = await make()
+        const before = await stateOf(id, doc._id)
+        const c = await cancelAs.admin(id)
+        assert.deepEqual([c.success, c.message], [false, R.PAID_CANCELLATION_MESSAGE])
+        assert.equal(await stateOf(id, doc._id), before)
+    }
+})
+
+await test('CP5. Unpaid appointments: doctor and admin cancellation still work (pending reservation and legacy unpaid)', async () => {
+    const d1 = await mkDoctor(docN++)
+    const r1 = await book(0, d1._id, D, '10:00 AM')
+    assert.deepEqual([(await cancelAs.doctor(r1.appointmentId, d1._id)).success], [true])
+    assert.deepEqual(await slotsOf(d1._id, D), [])
+    const d2 = await mkDoctor(docN++)
+    await doctorModel.updateOne({ _id: d2._id }, { $set: { [`slots_booked.${D}`]: ['11:00 AM'] } })
+    const [legacyId] = Object.values((await appointmentModel.collection.insertMany([{ userId: uid(0), docId: String(d2._id), slotDate: D, slotTime: '11:00 AM', userData: {}, docData: {}, amount: 500, date: Date.now(), cancelled: false, payment: false, isCompleted: false }])).insertedIds)
+    assert.equal((await cancelAs.admin(legacyId)).success, true)
+    assert.equal((await appointmentModel.findById(legacyId)).cancelled, true)
+    assert.deepEqual(await slotsOf(d2._id, D), [])
+})
+
+await test('CP6. 12 concurrent cancellations (patient/doctor/admin) of a paid appointment plus bookings: all refused, nothing released', async () => {
+    const { doc, id } = await paidAppointment()
+    const before = await stateOf(id, doc._id)
+    const attempts = Array.from({ length: 12 }, (_, i) => [cancelAs.patient(id), cancelAs.doctor(id, doc._id), cancelAs.admin(id)][i % 3])
+    const results = await Promise.all([...attempts, book(1, doc._id, D, '10:00 AM'), book(2, doc._id, D, '10:00 am')])
+    results.slice(0, 12).forEach(r => assert.deepEqual([r.success, r.message], [false, R.PAID_CANCELLATION_MESSAGE]))
+    assert.ok(results.slice(12).every(r => r.success === false), 'slot never became bookable')
+    assert.equal(await stateOf(id, doc._id), before)
+    await assertSlotInvariant(doc._id)
+})
+
+await test('CP7. Payment confirmation racing patient/doctor/admin cancellations (x10): never cancelled while paid, slot consistent', async () => {
+    for (let i = 0; i < 10; i++) {
+        const doc = await mkDoctor(docN++)
+        const r = await book(0, doc._id, D, '10:00 AM')
+        const resp = payOrder(r.order.id)
+        await Promise.all([
+            call(userCtl.verifyRazorpay, { userId: uid(0), body: resp }),
+            cancelAs.patient(r.appointmentId), cancelAs.doctor(r.appointmentId, doc._id), cancelAs.admin(r.appointmentId)
+        ])
+        const a = await appointmentModel.findById(r.appointmentId)
+        assert.ok(!(a.cancelled && a.payment), `iteration ${i}: paid appointment must not be cancelled`)
+        if (a.payment) { assert.equal(a.slotLocked, true); assert.ok((await slotsOf(doc._id, D)).includes('10:00 AM')) }
+        assert.ok(refundsFor(resp.razorpay_payment_id) <= 1)
+        await assertSlotInvariant(doc._id)
+    }
+})
+
+await test('CP8. UI rules: Cancel hidden for paid appointments in the patient app and in every admin/doctor view', async () => {
+    const fsMod = requireBackend('fs')
+    const PROJECT = requireBackend('path').resolve(BACKEND, '..')
+    for (const app of ['frontend', 'admin']) {
+        const rules = await import(pathToFileURL(`${PROJECT}/${app}/src/utils/appointmentRules.js`).href)
+        assert.equal(rules.canCancelAppointment({ payment: false, cancelled: false, isCompleted: false }), true, `${app}: unpaid active`)
+        assert.equal(rules.canCancelAppointment({ payment: true, cancelled: false, isCompleted: false }), false, `${app}: paid`)
+        assert.equal(rules.canCancelAppointment({ payment: true, status: 'confirmed', paymentMethod: 'online' }), false, `${app}: paid online`)
+        assert.equal(rules.canCancelAppointment({ payment: false, cancelled: true }), false, `${app}: already cancelled`)
+        assert.equal(rules.canCancelAppointment({ payment: false, isCompleted: true }), false, `${app}: completed`)
+        assert.equal(rules.canCancelAppointment({ payment: false, paymentStatus: 'refunded', cancelled: true }), false)
+        assert.equal(rules.isPaidAppointment({ payment: true }), true); assert.equal(rules.isPaidAppointment({ payment: false }), false)
+        assert.match(rules.PAID_CANCELLATION_NOTICE, /contact support|through support/)
+    }
+    // every UI place that renders a Cancel action gates it with canCancelAppointment(item)
+    const views = ['frontend/src/pages/MyAppointments.jsx', 'admin/src/pages/Admin/AllAppointments.jsx', 'admin/src/pages/Admin/Dashboard.jsx', 'admin/src/pages/Doctor/DoctorAppointments.jsx', 'admin/src/pages/Doctor/DoctorDashboard.jsx']
+    for (const view of views) {
+        const src = fsMod.readFileSync(`${PROJECT}/${view}`, 'utf8')
+        assert.match(src, /import \{[^}]*canCancelAppointment[^}]*\} from '[./]+\/utils\/appointmentRules'/, `${view} imports the rule`)
+        assert.ok(src.includes('canCancelAppointment(item)'), `${view} gates Cancel with the rule`)
+        assert.ok(src.includes('PAID_CANCELLATION_NOTICE'), `${view} explains why paid appointments cannot be cancelled`)
+    }
+    const patient = fsMod.readFileSync(`${PROJECT}/frontend/src/pages/MyAppointments.jsx`, 'utf8')
+    assert.match(patient, /\{canCancelAppointment\(item\) && \(\s*<button\s+onClick=\{\(\) => cancelAppointment\(item\._id\)\}/, 'patient Cancel button rendered only when allowed')
 })
 
 // ---- real server.js startup (child process, in-memory DB, NO .env in cwd) ----

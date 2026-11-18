@@ -4,7 +4,7 @@ import { cloudinary, connectCloudinary } from "../config/cloudinary.js"
 import doctorModel from "../models/doctorModel.js"
 import jwt from "jsonwebtoken"
 import appointmentModel from "../models/appointmentModel.js"
-import { cancelAndReleaseSlot } from "../utils/slotReservation.js"
+import { cancelAndReleaseSlot, PAID_CANCELLATION_MESSAGE } from "../utils/slotReservation.js"
 import userModel from "../models/userModel.js"
 import fs from "fs"
 
@@ -158,8 +158,12 @@ const appointmentCancel = async (req, res) => {
             return res.json({ success: false, message: 'Appointment not found' })
         }
 
-        // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it)
-        await cancelAndReleaseSlot(appointmentId)
+        // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it).
+        // Paid appointments are refused inside the same atomic update (no refund flow yet).
+        const result = await cancelAndReleaseSlot(appointmentId)
+        if (result.outcome === 'paid') {
+            return res.json({ success: false, message: PAID_CANCELLATION_MESSAGE })
+        }
 
         res.json({ success: true, message: 'Appointment Cancelled' })
 

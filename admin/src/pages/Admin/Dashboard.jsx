@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useMemo } from 'react'
 import { AdminContext } from '../../context/AdminContext'
 import { assets } from '../../assets/assets'
 import { AppContext } from '../../context/AppContext'
+import { canCancelAppointment, PAID_CANCELLATION_NOTICE } from '../../utils/appointmentRules'
 import {
   ComposedChart, Bar, Area,
   PieChart, Pie, Cell,
@@ -250,9 +251,12 @@ const Dashboard = () => {
                 ? <span className='text-xs font-medium px-3 py-1 rounded-full bg-red-50 text-red-500 border border-red-100'>Cancelled</span>
                 : item.isCompleted
                   ? <span className='text-xs font-medium px-3 py-1 rounded-full bg-green-50 text-green-600 border border-green-100'>Completed</span>
-                  : <button onClick={() => cancelAppointment(item._id)} className='text-xs font-medium px-3 py-1 rounded-full bg-gray-50 text-gray-500 border border-gray-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all'>
-                      Cancel
-                    </button>
+                  : canCancelAppointment(item)
+                    ? <button onClick={() => cancelAppointment(item._id)} className='text-xs font-medium px-3 py-1 rounded-full bg-gray-50 text-gray-500 border border-gray-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all'>
+                        Cancel
+                      </button>
+                    // paid appointments cannot be cancelled in the app (no refund flow yet)
+                    : <span title={PAID_CANCELLATION_NOTICE} className='text-xs font-medium px-3 py-1 rounded-full bg-blue-50 text-blue-500 border border-blue-100 cursor-help'>Paid</span>
               }
             </div>
           ))

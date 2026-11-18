@@ -2,7 +2,7 @@ import doctorModel from "../models/doctorModel.js"
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import appointmentModel from "../models/appointmentModel.js"
-import { cancelAndReleaseSlot, getExpiredHeldSlots } from "../utils/slotReservation.js"
+import { cancelAndReleaseSlot, getExpiredHeldSlots, PAID_CANCELLATION_MESSAGE } from "../utils/slotReservation.js"
 
 const changeAvailability = async (req, res) => {
     try {
@@ -129,8 +129,12 @@ const appointmentCancel = async (req, res) => {
 
         if (appointmentData && appointmentData.docId.toString() === docId.toString()) {
             
-            // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it)
-            await cancelAndReleaseSlot(appointmentId)
+            // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it).
+            // Paid appointments are refused inside the same atomic update (no refund flow yet).
+            const result = await cancelAndReleaseSlot(appointmentId)
+            if (result.outcome === 'paid') {
+                return res.json({success: false, message: PAID_CANCELLATION_MESSAGE})
+            }
 
             return res.json({success: true, message: 'Appointment Cancelled'})
 

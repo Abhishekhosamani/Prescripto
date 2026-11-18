@@ -2,6 +2,7 @@ import { useContext, useEffect, useMemo } from 'react'
 import { DoctorContext } from '../../context/DoctorContext'
 import { assets } from '../../assets/assets'
 import { AppContext } from '../../context/AppContext'
+import { canCancelAppointment, PAID_CANCELLATION_NOTICE } from '../../utils/appointmentRules'
 import {
   ComposedChart, Area, BarChart, Bar,
   PieChart, Pie, Cell,
@@ -266,7 +267,10 @@ const DoctorDashboard = () => {
                 : item.isCompleted
                   ? <span className='text-xs font-medium px-3 py-1 rounded-full bg-green-50 text-green-600 border border-green-100'>Completed</span>
                   : <div className='flex gap-2'>
-                      <button onClick={() => cancelAppointment(item._id)} className='text-xs px-3 py-1 rounded-full border border-red-200 text-red-400 hover:bg-red-50 transition-all'>Cancel</button>
+                      {canCancelAppointment(item)
+                        ? <button onClick={() => cancelAppointment(item._id)} className='text-xs px-3 py-1 rounded-full border border-red-200 text-red-400 hover:bg-red-50 transition-all'>Cancel</button>
+                        // paid appointments cannot be cancelled in the app (no refund flow yet)
+                        : <span title={PAID_CANCELLATION_NOTICE} className='text-xs px-3 py-1 rounded-full border border-blue-100 bg-blue-50 text-blue-500 cursor-help'>Paid</span>}
                       <button onClick={() => completeAppointment(item._id)} className='text-xs px-3 py-1 rounded-full border border-green-200 text-green-500 hover:bg-green-50 transition-all'>Complete</button>
                     </div>
               }

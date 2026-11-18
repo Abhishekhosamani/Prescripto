@@ -1,6 +1,7 @@
 import { useContext, useEffect } from 'react'
 import { DoctorContext } from '../../context/DoctorContext'
 import { AppContext } from '../../context/AppContext'
+import { canCancelAppointment, PAID_CANCELLATION_NOTICE } from '../../utils/appointmentRules'
 
 const DoctorAppointments = () => {
   const { dToken, appointments, getAppointments, completeAppointment, cancelAppointment } = useContext(DoctorContext)
@@ -15,12 +16,19 @@ const DoctorAppointments = () => {
     if (item.isCompleted) return <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-600 border border-green-100'>Completed</span>
     return (
       <div className='flex gap-1.5'>
-        <button
-          onClick={() => cancelAppointment(item._id)}
-          className='text-xs px-2.5 py-1 rounded-full border border-red-200 text-red-400 hover:bg-red-50 transition-all'
-        >
-          Cancel
-        </button>
+        {canCancelAppointment(item) ? (
+          <button
+            onClick={() => cancelAppointment(item._id)}
+            className='text-xs px-2.5 py-1 rounded-full border border-red-200 text-red-400 hover:bg-red-50 transition-all'
+          >
+            Cancel
+          </button>
+        ) : (
+          // paid appointments cannot be cancelled in the app (no refund flow yet)
+          <span title={PAID_CANCELLATION_NOTICE} className='text-xs px-2.5 py-1 rounded-full border border-blue-100 bg-blue-50 text-blue-500 cursor-help'>
+            Paid
+          </span>
+        )}
         <button
           onClick={() => completeAppointment(item._id)}
           className='text-xs px-2.5 py-1 rounded-full border border-green-200 text-green-500 hover:bg-green-50 transition-all'
