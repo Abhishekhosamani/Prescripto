@@ -2,6 +2,7 @@ import doctorModel from "../models/doctorModel.js"
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import appointmentModel from "../models/appointmentModel.js"
+import { cancelAndReleaseSlot, getExpiredHeldSlots } from "../utils/slotReservation.js"
 
 const changeAvailability = async (req, res) => {
     try {
@@ -23,6 +24,19 @@ const doctorList = async (req, res) => {
     try {
 
         const doctors = await doctorModel.find({}).select(['-password', '-email'])
+
+        // backend expiry check: slots held by expired (not yet cleaned up) online
+        // reservations are shown as available. Response only; nothing is written here.
+        const expiredHolds = await getExpiredHeldSlots()
+        if (expiredHolds.length > 0) {
+            const doctorsById = new Map(doctors.map(doc => [String(doc._id), doc]))
+            for (const hold of expiredHolds) {
+                const slots = doctorsById.get(String(hold.docId))?.slots_booked?.[hold.slotDate]
+                if (Array.isArray(slots)) {
+                    doctorsById.get(String(hold.docId)).slots_booked[hold.slotDate] = slots.filter(time => time !== hold.slotTime)
+                }
+            }
+        }
 
         res.json({success:true, doctors})
 
@@ -115,16 +129,8 @@ const appointmentCancel = async (req, res) => {
 
         if (appointmentData && appointmentData.docId.toString() === docId.toString()) {
             
-            await appointmentModel.findByIdAndUpdate(appointmentId, {cancelled: true})
-
-            // releasing doctor slot
-            const { slotDate, slotTime } = appointmentData
-            const doctorData = await doctorModel.findById(docId)
-            if (doctorData && doctorData.slots_booked && doctorData.slots_booked[slotDate]) {
-                let slots_booked = doctorData.slots_booked
-                slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime)
-                await doctorModel.findByIdAndUpdate(docId, { slots_booked })
-            }
+            // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it)
+            await cancelAndReleaseSlot(appointmentId)
 
             return res.json({success: true, message: 'Appointment Cancelled'})
 

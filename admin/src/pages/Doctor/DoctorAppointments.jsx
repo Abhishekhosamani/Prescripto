@@ -70,9 +70,17 @@ const DoctorAppointments = () => {
                 <p className='font-medium text-gray-800 truncate'>{item.userData.name}</p>
               </div>
 
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border w-fit ${item.payment ? 'bg-blue-50 text-blue-500 border-blue-100' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-                {item.payment ? 'Online' : 'Cash'}
-              </span>
+              {item.status === 'pending' && item.paymentMethod === 'online' && !item.payment ? (
+                <span className='text-xs font-medium px-2 py-0.5 rounded-full border w-fit bg-yellow-50 text-yellow-600 border-yellow-200'>
+                  Awaiting Payment
+                </span>
+              ) : (
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full border w-fit ${item.payment ? 'bg-blue-50 text-blue-500 border-blue-100' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
+                  {item.paymentStatus === 'refunded' ? 'Refunded'
+                    : ['refund_pending', 'refund_failed'].includes(item.paymentStatus) ? 'Refund pending'
+                    : item.payment ? 'Paid Online' : 'Unpaid'}
+                </span>
+              )}
 
               <p className='hidden sm:block text-gray-500'>{calculateAge(item.userData.dob)} yrs</p>
 

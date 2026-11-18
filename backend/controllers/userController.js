@@ -7,6 +7,11 @@ import doctorModel from '../models/doctorModel.js'
 import appointmentModel from '../models/appointmentModel.js'
 import razorpay from 'razorpay'
 import fs from 'fs'
+import {
+    getReservationMinutes, isValidSlotInput, canonicalSlotDate, canonicalSlotTime, claimSlot, releaseSlot, cancelAndReleaseSlot,
+    failPendingReservation, createRazorpayOrder, getRazorpay, verifyPaymentSignature,
+    verifyWebhookSignature, settlePaidOrder, syncRefund
+} from '../utils/slotReservation.js'
 
 // API to register user
 const registerUser = async (req, res) => {
@@ -176,8 +181,21 @@ const bookAppointment = async (req, res) => {
 
     try {
 
-        const { docId, slotDate, slotTime } = req.body
+        const { docId, paymentMethod } = req.body
         const userId = req.userId
+
+        // Online payment is mandatory: cash / COD / pay-at-clinic is rejected here,
+        // not only hidden in the UI. (A missing method means online.)
+        if (paymentMethod !== undefined && paymentMethod !== 'online') {
+            return res.json({ success: false, message: "Online payment is required to book an appointment. Cash / pay at clinic is not available." })
+        }
+
+        // Canonical slot key, independent of the browser's locale/time format
+        const slotDate = canonicalSlotDate(req.body.slotDate)
+        const slotTime = canonicalSlotTime(req.body.slotTime)
+        if (!slotDate || !slotTime || !isValidSlotInput(slotDate, slotTime) || !/:(00|30) /.test(slotTime)) {
+            return res.json({ success: false, message: "Invalid slot" })
+        }
 
         const docData = await doctorModel.findById(docId).select('-password')
 
@@ -189,29 +207,22 @@ const bookAppointment = async (req, res) => {
             return res.json({ success: false, message: "Doctor not available" })
         }
 
-        let slots_booked = docData.slots_booked
-
-        // checking for slot availability
-        if (slots_booked[slotDate]) {
-            if (slots_booked[slotDate].includes(slotTime)) {
-                return res.json({ success: false, message: "Slot not available" })
-            } else {
-                slots_booked[slotDate].push(slotTime)
-            }
-        } else {
-            slots_booked[slotDate] = []
-            slots_booked[slotDate].push(slotTime)
-        }
-
         const userData = await userModel.findById(userId).select('-password')
 
         if (!userData) {
             return res.json({ success: false, message: "User not found. Please log out and register again." })
         }
 
+        // atomically claim the slot (reclaims it if held by an expired online reservation)
+        const claim = await claimSlot(docId, slotDate, slotTime)
+        if (!claim.ok) {
+            return res.json({ success: false, message: "Slot not available" })
+        }
+
         const docDataPlain = docData.toObject()
         delete docDataPlain.slots_booked
 
+        const now = Date.now()
         const appointmentData = {
             userId,
             docId,
@@ -220,16 +231,45 @@ const bookAppointment = async (req, res) => {
             amount: docData.fees,
             slotTime,
             slotDate,
-            date: Date.now()
+            date: now,
+            slotLocked: true,
+            // created as a reservation only; confirmed solely by verified payment
+            paymentMethod: 'online',
+            status: 'pending',
+            paymentStatus: 'pending',
+            reservedAt: new Date(now),
+            expiresAt: new Date(now + getReservationMinutes() * 60 * 1000)
         }
 
-        const newAppointment = new appointmentModel(appointmentData)
-        await newAppointment.save()
+        let newAppointment
+        try {
+            newAppointment = new appointmentModel(appointmentData)
+            await newAppointment.save()
+        } catch (saveError) {
+            // unique index backstop: another live appointment already holds this slot
+            if (saveError?.code === 11000) {
+                return res.json({ success: false, message: "Slot not available" })
+            }
+            await releaseSlot(docId, slotDate, slotTime)
+            throw saveError
+        }
 
-        // save new slots data in docData
-        await doctorModel.findByIdAndUpdate(docId, { slots_booked })
-
-        res.json({ success: true, message: 'Appointment Booked' })
+        // create the Razorpay order only after the slot reservation succeeded
+        try {
+            const order = await createRazorpayOrder(newAppointment)
+            await appointmentModel.updateOne({ _id: newAppointment._id, status: 'pending' }, { $set: { razorpayOrderId: order.id } })
+            return res.json({
+                success: true,
+                message: `Slot reserved. Complete payment within ${getReservationMinutes()} minutes.`,
+                appointmentId: newAppointment._id,
+                expiresAt: newAppointment.expiresAt,
+                order
+            })
+        } catch (orderError) {
+            console.log(orderError)
+            await failPendingReservation(newAppointment._id)
+            return res.json({ success: false, message: "Failed to initiate payment. Please try again." })
+        }
 
     } catch (error) {
         console.log(error)
@@ -272,18 +312,8 @@ const cancelAppointment = async (req, res) => {
             return res.json({ success: false, message: "Unauthorized action" })
         }
 
-        await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
-
-        // releasing doctor slot
-        const { docId, slotDate, slotTime } = appointmentData
-
-        const doctorData = await doctorModel.findById(docId)
-
-        if (doctorData && doctorData.slots_booked && doctorData.slots_booked[slotDate]) {
-            let slots_booked = doctorData.slots_booked
-            slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime)
-            await doctorModel.findByIdAndUpdate(docId, { slots_booked })
-        }
+        // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it)
+        await cancelAndReleaseSlot(appointmentId)
 
         res.json({ success: true, message: 'Appointment Cancelled' })
 
@@ -298,10 +328,7 @@ const paymentRazorpay = async (req, res) => {
 
     try {
 
-        const razorpayInstance = new razorpay({
-            key_id: process.env.RAZORPAY_KEY_ID,
-            key_secret: process.env.RAZORPAY_KEY_SECRET
-        })
+        const razorpayInstance = getRazorpay()
 
         const { appointmentId } = req.body
 
@@ -309,6 +336,39 @@ const paymentRazorpay = async (req, res) => {
 
         if (!appointmentData || appointmentData.cancelled) {
             return res.json({ success: false, message: "Appointment Cancelled or not found" })
+        }
+
+        // only the owner of the appointment / reservation may pay for it
+        if (String(appointmentData.userId) !== String(req.userId)) {
+            return res.json({ success: false, message: "Unauthorized action" })
+        }
+
+        if (appointmentData.payment) {
+            return res.json({ success: false, message: "Appointment is already paid" })
+        }
+
+        // online reservation: payment is only allowed while the hold is active
+        const isOnlineReservation = appointmentData.paymentMethod === 'online'
+        if (isOnlineReservation) {
+            if (appointmentData.status !== 'pending' || !appointmentData.expiresAt || appointmentData.expiresAt <= new Date()) {
+                return res.json({ success: false, message: "Reservation expired. Please book the slot again." })
+            }
+
+            // reuse the existing order so a resumed checkout cannot create a second payable order
+            if (appointmentData.razorpayOrderId) {
+                const existingOrder = await razorpayInstance.orders.fetch(appointmentData.razorpayOrderId)
+                if (existingOrder?.status === 'paid' || existingOrder?.status === 'attempted') {
+                    // a captured or authorized payment may already exist: settle it instead of collecting again
+                    const result = await settlePaidOrder({ orderId: existingOrder.id })
+                    const current = await appointmentModel.findById(appointmentId).select('status').lean()
+                    if (existingOrder.status === 'paid' || current?.status !== 'pending') {
+                        return res.json({ success: false, message: result.message })
+                    }
+                }
+                if (existingOrder) {
+                    return res.json({ success: true, order: existingOrder, expiresAt: appointmentData.expiresAt })
+                }
+            }
         }
 
         // creating options for razorpay payment
@@ -320,6 +380,11 @@ const paymentRazorpay = async (req, res) => {
 
         // creation of an order
         const order = await razorpayInstance.orders.create(options)
+
+        if (isOnlineReservation) {
+            await appointmentModel.updateOne({ _id: appointmentId, status: 'pending' }, { $set: { razorpayOrderId: order.id } })
+            return res.json({ success: true, order, expiresAt: appointmentData.expiresAt })
+        }
 
         res.json({ success: true, order })
 
@@ -335,20 +400,16 @@ const verifyRazorpay = async (req, res) => {
 
     try {
 
-        const razorpayInstance = new razorpay({
-            key_id: process.env.RAZORPAY_KEY_ID,
-            key_secret: process.env.RAZORPAY_KEY_SECRET
-        })
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body
 
-        const {razorpay_order_id} = req.body
-        const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id)
-
-        if (orderInfo.status === 'paid') {
-            await appointmentModel.findByIdAndUpdate(orderInfo.receipt, {payment: true})
-            res.json({success:true, message: "Payment Successful"})
-        } else {
-            res.json({success:false, message: "Payment failed"})
+        // never trust frontend success alone: verify the checkout signature first
+        if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
+            return res.json({ success: false, message: "Payment verification failed" })
         }
+
+        // order status is fetched from Razorpay; settlement is idempotent
+        const result = await settlePaidOrder({ orderId: razorpay_order_id, paymentId: razorpay_payment_id, userId: req.userId })
+        res.json(result)
 
     } catch (error) {
         console.log(error)
@@ -356,4 +417,101 @@ const verifyRazorpay = async (req, res) => {
     }
 }
 
-export { registerUser, loginUser, getProfile, updateProfile, bookAppointment, listAppointment, cancelAppointment, paymentRazorpay, verifyRazorpay }
+// API called when a Razorpay payment attempt fails (or is rejected) in Checkout.
+// A failed attempt is NOT a cancellation: the reservation stays pending and unpaid
+// until its ORIGINAL expiresAt, so the user can retry with the same order. Nothing
+// here changes status, expiresAt, slotLocked or slots_booked; the slot is released
+// only by expiry (cron / reclaim) or by an explicit cancellation.
+const reportPaymentFailure = async (req, res) => {
+
+    try {
+
+        const { appointmentId } = req.body
+        const userId = req.userId
+
+        const appointmentData = await appointmentModel.findById(appointmentId)
+
+        if (!appointmentData) {
+            return res.json({ success: false, message: "Appointment not found" })
+        }
+
+        if (appointmentData.userId.toString() !== userId.toString()) {
+            return res.json({ success: false, message: "Unauthorized action" })
+        }
+
+        if (appointmentData.paymentMethod !== 'online' || appointmentData.status !== 'pending') {
+            return res.json({ success: false, message: "No active reservation" })
+        }
+
+        // another attempt on the same order may already have succeeded (or be authorized): settle it
+        if (appointmentData.razorpayOrderId) {
+            const order = await getRazorpay().orders.fetch(appointmentData.razorpayOrderId)
+            if (order?.status === 'paid' || order?.status === 'attempted') {
+                const result = await settlePaidOrder({ orderId: order.id, userId })
+                const current = await appointmentModel.findById(appointmentId).select('status').lean()
+                if (current?.status !== 'pending') return res.json(result)
+            }
+        }
+
+        // record the failed attempt only; never touches the reservation or its deadline
+        await appointmentModel.updateOne(
+            { _id: appointmentId, status: 'pending' },
+            { $set: { lastPaymentFailureAt: new Date() }, $inc: { paymentFailureCount: 1 } }
+        )
+
+        const expired = !appointmentData.expiresAt || appointmentData.expiresAt <= new Date()
+        res.json({
+            success: true,
+            message: expired
+                ? "Payment failed and the reservation has expired."
+                : "Payment failed. Your slot is still reserved, so you can retry before the reservation expires.",
+            expiresAt: appointmentData.expiresAt,
+            reservationActive: !expired
+        })
+
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+// Razorpay webhook (payment.captured / order.paid). Configure in the Razorpay dashboard
+// with RAZORPAY_WEBHOOK_SECRET. Receives the raw body (see server.js).
+const razorpayWebhook = async (req, res) => {
+
+    try {
+
+        const secret = process.env.RAZORPAY_WEBHOOK_SECRET
+        if (!secret) {
+            return res.status(503).json({ success: false, message: "Webhook not configured" })
+        }
+
+        const rawBody = Buffer.isBuffer(req.body) ? req.body : null
+        if (!verifyWebhookSignature(rawBody, req.headers['x-razorpay-signature'], secret)) {
+            return res.status(400).json({ success: false, message: "Invalid signature" })
+        }
+
+        const event = JSON.parse(rawBody.toString('utf8'))
+
+        if (event.event === 'payment.captured' || event.event === 'order.paid') {
+            const payment = event.payload?.payment?.entity
+            const orderId = payment?.order_id || event.payload?.order?.entity?.id
+            if (orderId) {
+                await settlePaidOrder({ orderId, paymentId: payment?.id })
+            }
+        } else if (event.event === 'refund.processed' || event.event === 'refund.failed') {
+            // optional: re-sync our refund record (status is re-read from Razorpay, never from the event)
+            const refundPaymentId = event.payload?.refund?.entity?.payment_id
+            if (refundPaymentId) await syncRefund(refundPaymentId, { ignoreSchedule: true })
+        }
+
+        res.json({ success: true })
+
+    } catch (error) {
+        console.log(error)
+        // non-2xx makes Razorpay retry; settlement is idempotent
+        res.status(500).json({ success: false, message: error.message })
+    }
+}
+
+export { registerUser, loginUser, getProfile, updateProfile, bookAppointment, listAppointment, cancelAppointment, paymentRazorpay, verifyRazorpay, reportPaymentFailure, razorpayWebhook }

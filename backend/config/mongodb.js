@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { resolveDatabaseName } from "./environment.js";
 
 let listenersRegistered = false;
 
@@ -20,8 +21,20 @@ const connectDB = async () => {
         throw err;
     }
 
+    // Local default stays 'prescripto_test'; production must set MONGODB_DB_NAME
+    // explicitly and fails here instead of silently using the test database.
+    let dbName;
     try {
-        await mongoose.connect(process.env.MONGODB_URI, { dbName: 'prescripto' });
+        dbName = resolveDatabaseName();
+    } catch (err) {
+        console.error("MongoDB configuration error:", err.message);
+        throw err;
+    }
+
+    try {
+        // await mongoose.connect(process.env.MONGODB_URI, { dbName: 'prescripto' });
+        await mongoose.connect(process.env.MONGODB_URI, { dbName });
+        console.log(`MongoDB database: ${mongoose.connection.db?.databaseName || dbName}`);
     } catch (error) {
         console.error("Failed to connect to MongoDB:", error.message);
         throw error;

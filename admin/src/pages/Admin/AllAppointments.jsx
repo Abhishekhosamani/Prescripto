@@ -13,6 +13,17 @@ const AllAppointments = () => {
   const StatusBadge = ({ item }) => {
     if (item.cancelled) return <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-500 border border-red-100'>Cancelled</span>
     if (item.isCompleted) return <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-600 border border-green-100'>Completed</span>
+    if (item.status === 'pending' && item.paymentMethod === 'online' && !item.payment) return (
+      <div className='flex items-center gap-1.5'>
+        <span className='px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-50 text-yellow-600 border border-yellow-200'>Awaiting Payment</span>
+        <button
+          onClick={() => cancelAppointment(item._id)}
+          className='px-2.5 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-500 border border-gray-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all'
+        >
+          Cancel
+        </button>
+      </div>
+    )
     return (
       <button
         onClick={() => cancelAppointment(item._id)}
@@ -72,7 +83,14 @@ const AllAppointments = () => {
                 <p className='font-medium text-gray-700 truncate'>{item.docData.name}</p>
               </div>
 
-              <p className='font-semibold text-gray-800'>{currency}{item.amount}</p>
+              <p className='font-semibold text-gray-800'>
+                {currency}{item.amount}
+                <span className={`block text-xs font-normal ${item.payment ? 'text-blue-500' : 'text-gray-400'}`}>
+                  {item.paymentStatus === 'refunded' ? 'Refunded'
+                    : ['refund_pending', 'refund_failed'].includes(item.paymentStatus) ? 'Refund pending'
+                    : item.payment ? 'Paid Online' : 'Unpaid'}
+                </span>
+              </p>
 
               <StatusBadge item={item} />
             </div>

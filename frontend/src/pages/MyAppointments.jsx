@@ -49,7 +49,9 @@ const MyAppointments = () => {
     }
   }
 
-  const initPay = (order) => {
+  const initPay = (order, appointmentId, expiresAt) => {
+    // expiresAt is only returned for online reservations (10-minute hold)
+    const secondsLeft = expiresAt ? Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000) : 0
     const options = {
       key: import.meta.env.VITE_RAZORPAY_KEY_ID,
       amount: order.amount,
@@ -58,12 +60,16 @@ const MyAppointments = () => {
       description: 'Appointment Payment',
       order_id: order.id,
       receipt: order.receipt,
+      ...(secondsLeft > 0 ? { timeout: secondsLeft } : {}),
       handler: async (response) => {
         try {
           const { data } = await axios.post(backendUrl + '/api/user/verifyRazorpay', response, { headers: { token } })
           if (data.success) {
             getUserAppointments()
             navigate('/my-appointments')
+          } else {
+            toast.error(data.message)
+            getUserAppointments()
           }
         } catch (error) {
           console.log(error)
@@ -75,6 +81,15 @@ const MyAppointments = () => {
       return toast.error('Payment gateway not loaded. Please refresh the page.')
     }
     const rzp = new window.Razorpay(options)
+    if (expiresAt) {
+      // A failed/rejected attempt does NOT end the reservation: Checkout stays open for a
+      // retry and the slot is held until the original expiry. The backend only records it.
+      rzp.on('payment.failed', () => {
+        const until = new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        toast.warn(`Payment failed. Your slot is held until ${until} — you can retry.`)
+        axios.post(backendUrl + '/api/user/payment-failed', { appointmentId }, { headers: { token } }).catch(error => console.log(error))
+      })
+    }
     rzp.open()
   }
 
@@ -84,7 +99,10 @@ const MyAppointments = () => {
     try {
       const { data } = await axios.post(backendUrl + '/api/user/payment-razorpay', { appointmentId }, { headers: { token } })
       if (data.success) {
-        initPay(data.order)
+        initPay(data.order, appointmentId, data.expiresAt)
+      } else if (data.message) {
+        toast.error(data.message)
+        getUserAppointments()
       }
     } catch (error) {
       console.log(error)
@@ -102,6 +120,9 @@ const MyAppointments = () => {
 
   const StatusBadge = ({ item }) => {
     if (item.isCompleted) return <span className='px-3 py-1 rounded-full text-xs font-medium bg-green-50 text-green-600 border border-green-200'>Completed</span>
+    if (item.paymentStatus === 'refunded' || item.paymentStatus === 'refund_pending' || item.paymentStatus === 'refund_failed') return <span className='px-3 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-500 border border-gray-200'>Refunded</span>
+    if (item.status === 'expired') return <span className='px-3 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-500 border border-gray-200'>Expired</span>
+    if (item.status === 'failed') return <span className='px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-500 border border-red-200'>Payment Failed</span>
     if (item.cancelled) return <span className='px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-500 border border-red-200'>Cancelled</span>
     if (item.payment) return <span className='px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-500 border border-blue-200'>Paid</span>
     return <span className='px-3 py-1 rounded-full text-xs font-medium bg-yellow-50 text-yellow-600 border border-yellow-200'>Pending Payment</span>
@@ -145,6 +166,9 @@ const MyAppointments = () => {
               <div className='mt-3 flex flex-col gap-1 text-xs text-gray-500'>
                 <p>📍 {item.docData?.address?.line1}{item.docData?.address?.line2 ? `, ${item.docData.address.line2}` : ''}</p>
                 <p>🗓 {slotDateFormat(item.slotDate)} &nbsp;|&nbsp; 🕐 {item.slotTime}</p>
+                {item.status === 'pending' && !item.cancelled && item.expiresAt && (
+                  <p className='text-yellow-600'>⏳ Slot reserved. Complete payment by {new Date(item.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                )}
               </div>
 
               {/* Action Buttons */}

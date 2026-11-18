@@ -4,6 +4,7 @@ import { cloudinary, connectCloudinary } from "../config/cloudinary.js"
 import doctorModel from "../models/doctorModel.js"
 import jwt from "jsonwebtoken"
 import appointmentModel from "../models/appointmentModel.js"
+import { cancelAndReleaseSlot } from "../utils/slotReservation.js"
 import userModel from "../models/userModel.js"
 import fs from "fs"
 
@@ -153,19 +154,12 @@ const appointmentCancel = async (req, res) => {
 
         const appointmentData = await appointmentModel.findById(appointmentId)
 
-        await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
+        if (!appointmentData) {
+            return res.json({ success: false, message: 'Appointment not found' })
+        }
 
-        // releasing doctor slot
-
-        const { docId, slotDate, slotTime } = appointmentData
-
-        const doctorData = await doctorModel.findById(docId)
-
-        let slots_booked = doctorData.slots_booked
-
-        slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime)
-
-        await doctorModel.findByIdAndUpdate(docId, { slots_booked })
+        // mark cancelled and release doctor slot (atomic; only releases if this call cancelled it)
+        await cancelAndReleaseSlot(appointmentId)
 
         res.json({ success: true, message: 'Appointment Cancelled' })
 
